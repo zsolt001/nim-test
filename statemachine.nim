@@ -9,8 +9,11 @@ type
     events: seq[Event]
     transitionMap: TransitionMap
 
-  State = distinct string
-  Event = distinct string
+  State = object of RootObj
+    name: string
+
+  Event = object of RootObj
+    name: string
   
   TransitionKey = object
     currentState: State
@@ -28,15 +31,18 @@ type
   Action = proc(ctx: Context): Option[Output]
 
 
-proc `==`(s1, s2: State): bool = 
-  return (string(s1) == string(s2))
+proc `$`(st: State): string =
+  return "State: " & st.name
 
-proc `==`(e1, e2: Event): bool = 
-  return (string(e1) == string(e2))
+proc `$`(ev: Event): string =
+  return "Event: " & ev.name
 
-proc hash(k : TransitionKey) : Hash =
-  result = string(k.currentState).hash !& string(k.receivedEvent).hash
-  result = !$result
+proc `$`(tr: Transition): string =
+  return $tr.source & " -> " & $tr.target
+
+# proc hash(k : TransitionKey) : Hash =
+#   result = string(k.currentState).hash !& string(k.receivedEvent).hash
+#   result = !$result
 
 
 func newStateMachine(states: seq[State], events: seq[Event], transitions: seq[Transition]): StateMachine =
@@ -56,48 +62,69 @@ func newStateMachine(states: seq[State], events: seq[Event], transitions: seq[Tr
 
 proc receive(sm: StateMachine, ctx: var Context, event: Event) : Option[Output] = 
   print "------------------"
-  print ctx
-  print event
+  echo "<<< ", ctx
+  echo "<<< ", event
   let transitionKey = TransitionKey(currentState: ctx.currentState, receivedEvent: event)
   
   try:
     let transition = sm.transitionMap[transitionKey]
-    print ">>> ", transition
+    echo ">>> ", transition
 
     let output = transition.action(ctx)
     ctx.currentState = transition.target
     return output
   except KeyError:
-    print "no transition exist"
-
-  print "------------------\n"
+    echo ">>> no transition exists"
 
 
 
+# ============================================================
+#   Create test StateMachine instance and execute some 
+#   transitions
+# ============================================================
 
-const 
-  states : seq[State]= @["idle".State, "connected".State, "receivedMail".State]
-  events : seq[Event]= @["CONNECT".Event, "MAIL".Event, "QUIT".Event]
+
+type 
+  SmtpCtx = object of Context
+    rawLine: string
 
 let 
+  # States
+  IdleState = State(name: "idle")
+  ConnectedState = State(name: "connected")
+  ReceivedMailState= State(name: "receivedMail")
+  states = @[IdleState, ConnectedState, ReceivedMailState]
+
+  # Events
+  ConnectEvent = Event(name: "CONNECT")
+  MailCmd = Event(name: "MAIL")
+  QuitCmd =  Event(name: "QUIT")
+  events = @[ConnectEvent, MailCmd, QuitCmd]
+
+  # Actions
   defaultAction : Action = proc(ctx: Context) : Option[Output] =
-    print ">>> executing default action in state: ", ctx.currentState
+    echo ">>> executing default action in state: ", ctx.currentState
   
+  # Transitions
   transitions:seq[Transition] = @[
-    ("idle".State, "CONNECT".Event, "connected".State, defaultAction),
-    ("connected".State, "MAIL".Event, "receivedMail".State, defaultAction),
-    ("connected".State, "QUIT".Event, "idle".State, defaultAction),
-    ("receivedMail".State, "QUIT".Event, "idle".State, defaultAction),
+    # Client Connect
+    (IdleState, ConnectEvent, ConnectedState, defaultAction),
+    # MAIL FROM
+    (ConnectedState, MailCmd, ReceivedMailState, defaultAction),
+    # QUIT
+    (ConnectedState, QuitCmd, IdleState, defaultAction),
+    (ReceivedMailState, QuitCmd, IdleState, defaultAction),
   ]
  
   
 var
   fsm = newStateMachine(states, events, transitions)
-  ctx = Context(currentState: "idle".State)
+  ctx = SmtpCtx(currentState: IdleState)
 
-print "Started State Machine"
+print "\nStarted State Machine\n"
 
-print fsm.receive(ctx, "MAIL".Event)
-print fsm.receive(ctx, "CONNECT".Event)
+discard fsm.receive(ctx, MailCmd)
+discard fsm.receive(ctx, ConnectEvent)
+discard fsm.receive(ctx, QuitCmd)
 
 
