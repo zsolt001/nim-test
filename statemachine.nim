@@ -1,43 +1,45 @@
 import std/options
 import std/tables
 import pretty
+import terminal
 
 type
-  Transition*[S] = object
+  Transition*[S, D] = object
     source*: S
     eventType*: string
     target*: S
-    action*: Action[S]
+    action*: Action[S, D]
 
   Output* = object of RootObj
     msg*: string
 
-  Action*[S] = proc(ctx: Context[S]): Option[Output]
+  Action*[S, D] = proc(ctx: Context[S, D]): Option[Output]
 
-  StateMachine[S: enum] = object
+  StateMachine[S: enum, D] = object
     events: seq[string]
-    transitionMap: TransitionMap[S]
+    transitionMap: TransitionMap[S, D]
 
   TransitionKey[S] = object
     state: S
     eventType: string
 
-  TransitionMap[S] = Table[TransitionKey[S], Transition[S]]
+  TransitionMap[S, D] = Table[TransitionKey[S], Transition[S, D]]
 
-  Context*[S] = object of RootObj
+  Context*[S, D] = object
     currentState*: S
+    data*: D
 
 proc `$`(tr: Transition): string =
-  return $tr.source & " -> " & $tr.target
+  return $tr.source & " ---" & tr.eventType & "---> " & $tr.target
 
-func newStateMachine*[S: enum](
+proc newStateMachine*[S: enum, D](
     events: seq[string], transitions: seq[Transition]
-): StateMachine[S] =
+): StateMachine[S, D] =
   result.events = events
 
   # map the FSM's state and the incoming event to a transition that we need to apply
   var
-    trmap: TransitionMap[S]
+    trmap: TransitionMap[S, D]
     key: TransitionKey[S]
 
   for tr in transitions:
@@ -47,7 +49,9 @@ func newStateMachine*[S: enum](
 
   result.transitionMap = trmap
 
-proc receive[S](sm: StateMachine[S], ctx: var Context[S], event: object): Option[Output] =
+proc receive[S, D](
+    sm: StateMachine[S, D], ctx: var Context, event: object
+): Option[Output] =
   print "\n\n<<<<<<<<<<<"
   print ctx
   print event
@@ -58,25 +62,26 @@ proc receive[S](sm: StateMachine[S], ctx: var Context[S], event: object): Option
 
   try:
     let transition = sm.transitionMap[transitionKey]
+    styledEcho(fgRed, $transition)
     print transition
 
     let output = transition.action(ctx)
     ctx.currentState = transition.target
     return output
   except KeyError:
-    echo "no transition exists"
+    styledEcho(fgYellow, "no transition exists")
 
 type
-  Instance[S] = object
-    ctx: Context[S]
-    sm: StateMachine[S]
+  Instance[S, D] = object
+    ctx: Context[S, D]
+    sm: StateMachine[S, D]
 
-func newInstance*[S](
-    context: Context[S], events: seq[string], transitions: seq[Transition]
-): Instance[S] =
-  return Instance[S](ctx: context, sm: newStateMachine[S](events, transitions))
+func newInstance*[S, D](
+    context: Context[S, D], events: seq[string], transitions: seq[Transition]
+): Instance[S, D] =
+  return Instance[S, D](ctx: context, sm: newStateMachine[S, D](events, transitions))
 
-proc sendevent*[S](inst: var Instance[S], event: object): Option[Output] =
+proc sendevent*[S, D](inst: var Instance[S, D], event: object): Option[Output] =
   result = receive(inst.sm, inst.ctx, event)
 
 # ============================================================
@@ -84,73 +89,70 @@ proc sendevent*[S](inst: var Instance[S], event: object): Option[Output] =
 #   transitions
 # ============================================================
 
-# type
-#   # Context
-#   SmtpCtx[S] = object of Context[S]
-#     rawLine: string
+type
+  # Context
+  ContextData = object
 
-#   # States
-#   State = enum
-#     Idle
-#     Connected
-#     ReceivedMail
+  # States
+  State = enum
+    Idle
+    Connected
+    ReceivedMail
 
-#   # Events
-#   ConnectEvent = object
-#     clientAddress: string
+  # Events
+  ConnectEvent = object
+    clientAddress: string
 
-#   MailCmd = object
-#     fromArg: string
+  MailCmd = object
+    fromArg: string
 
-#   QuitCmd = object
+  QuitCmd = object
 
-# let
-#   eventTypes = @[$ConnectEvent, $MailCmd, $QuitCmd]
+let
+  eventTypes = @[$ConnectEvent, $MailCmd, $QuitCmd]
 
-#   # Transitions
-#   defaultAction: Action[State] =
-#     proc(ctx: Context[State]): Option[Output] =
-#         print "running default action with context:"
-#         print ctx
+  # Transitions
+  defaultAction: Action[State, ContextData] =
+    proc(ctx: Context[State, ContextData]): Option[Output] =
+        print "running default action with context:"
+        print ctx
 
-#   transitions =
-#     @[
-#       # Client Connect
-#       Transition[State](
-#         source: State.Idle,
-#         eventType: $ConnectEvent,
-#         target: State.Connected,
-#         action: defaultAction,
-#       ),
-#       # MAIL FROM
-#       Transition[State](
-#         source: State.Connected,
-#         eventType: $MailCmd,
-#         target: State.ReceivedMail,
-#         action: defaultAction,
-#       ),
-#       # QUIT
-#       Transition[State](
-#         source: State.Connected,
-#         eventType: $QuitCmd,
-#         target: State.Idle,
-#         action: defaultAction,
-#       ),
-#       Transition[State](
-#         source: State.ReceivedMail,
-#         eventType: $QuitCmd,
-#         target: State.Idle,
-#         action: defaultAction,
-#       )
-#     ]
+  transitions =
+    @[
+      # Client Connect
+      Transition[State, ContextData](
+        source: State.Idle,
+        eventType: $ConnectEvent,
+        target: State.Connected,
+        action: defaultAction,
+      ),
+      # MAIL FROM
+      Transition[State, ContextData](
+        source: State.Connected,
+        eventType: $MailCmd,
+        target: State.ReceivedMail,
+        action: defaultAction,
+      ),
+      # QUIT
+      Transition[State, ContextData](
+        source: State.Connected,
+        eventType: $QuitCmd,
+        target: State.Idle,
+        action: defaultAction,
+      ),
+      Transition[State, ContextData](
+        source: State.ReceivedMail,
+        eventType: $QuitCmd,
+        target: State.Idle,
+        action: defaultAction,
+      )
+    ]
 
-# var
-#   ctx2 = Context[State](currentState: State.Idle)
-#   smtpctx = SmtpCtx[State](currentState: State.Idle)
-#   myinst = newInstance[State](smtpctx, eventTypes, transitions)
+var
+  ctx2 = Context[State, ContextData](currentState: State.Idle)
+  myinst = newInstance[State, ContextData](ctx2, eventTypes, transitions)
 
-# print smtpctx
-
-# print myinst.sendevent(ConnectEvent())
-# print myinst.sendevent(MailCmd())
-# print myinst.sendevent(QuitCmd())
+print myinst.sendevent(MailCmd())
+print myinst.sendevent(ConnectEvent())
+print myinst.sendevent(MailCmd())
+print myinst.sendevent(QuitCmd())

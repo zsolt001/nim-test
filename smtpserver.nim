@@ -4,8 +4,9 @@ import pretty
 
 type
   # Context
-  SmtpCtx[S] = object of Context[S]
-    rawLine: string
+  ContextData = object
+    mailbuffer: string
+    databuffer: seq[string]
 
   # States
   State = enum
@@ -26,35 +27,35 @@ let
   eventTypes = @[$ConnectEvent, $MailCmd, $QuitCmd]
 
   # Transitions
-  defaultAction: Action[State] =
-    proc(ctx: Context[State]): Option[Output] =
+  defaultAction: Action[State, ContextData] =
+    proc(ctx: Context[State, ContextData]): Option[Output] =
         print "running default action with context:"
         print ctx
 
   transitions =
     @[
       # Client Connect
-      Transition[State](
+      Transition[State, ContextData](
         source: State.Idle,
         eventType: $ConnectEvent,
         target: State.Connected,
         action: defaultAction,
       ),
       # MAIL FROM
-      Transition[State](
+      Transition[State, ContextData](
         source: State.Connected,
         eventType: $MailCmd,
         target: State.ReceivedMail,
         action: defaultAction,
       ),
       # QUIT
-      Transition[State](
+      Transition[State, ContextData](
         source: State.Connected,
         eventType: $QuitCmd,
         target: State.Idle,
         action: defaultAction,
       ),
-      Transition[State](
+      Transition[State, ContextData](
         source: State.ReceivedMail,
         eventType: $QuitCmd,
         target: State.Idle,
@@ -63,12 +64,10 @@ let
     ]
 
 var
-  ctx = Context[State](currentState: State.Idle)
-  smtpctx = SmtpCtx[State](currentState: State.Idle)
-  myinst = newInstance[State](smtpctx, eventTypes, transitions)
+  ctx2 = Context[State, ContextData](currentState: State.Idle)
+  myinst = newInstance[State, ContextData](ctx2, eventTypes, transitions)
 
-print smtpctx
-
+print myinst.sendevent(MailCmd())
 print myinst.sendevent(ConnectEvent())
 print myinst.sendevent(MailCmd())
 print myinst.sendevent(QuitCmd())
